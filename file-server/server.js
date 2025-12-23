@@ -3,9 +3,11 @@ const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const drive = require('./drive');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const ENABLE_DRIVE = fs.existsSync(path.join(__dirname, 'credentials.json'));
 
 // Middleware
 app.use(cors());
@@ -27,13 +29,13 @@ const storage = multer.diskStorage({
   }
 });
 
-const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB limit
+const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } });
 
 // Routes
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', timestamp: new Date().toISOString(), driveEnabled: ENABLE_DRIVE });
 });
 
 // List files in directory
@@ -63,18 +65,69 @@ app.get('/api/files/:dir?', (req, res) => {
   }
 });
 
-// Upload file
-app.post('/api/upload', upload.single('file'), (req, res) => {
+// Upload file (with optional Drive sync)
+app.post('/api/upload', upload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
   }
-  res.json({
+
+  const response = {
     message: 'File uploaded successfully',
     filename: req.file.filename,
     originalName: req.file.originalname,
     size: req.file.size,
-    url: `/uploads/${req.file.filename}`
-  });
+    url: `/uploads/${req.file.filename}`,
+    driveId: null
+  };
+
+  // Sync to Google Drive if enabled
+  if (ENABLE_DRIVE && req.body.syncToDrive === 'true') {
+    try {
+      const driveFile = await drive.uploadFileToDrive(req.file.path, req.file.originalname);
+      response.driveId = driveFile.id;
+      response.driveLink = driveFile.webViewLink;
+    } catch (error) {
+      console.error('Drive sync failed:', error);
+      response.driveSyncError = error.message;
+    }
+  }
+
+  res.json(response);
+});
+
+// List Google Drive files
+app.get('/api/drive/files', async (req, res) => {
+  if (!ENABLE_DRIVE) {
+    return res.status(400).json({ error: 'Google Drive not enabled' });
+  }
+
+  try {
+    const files = await drive.listDriveFiles();
+    res.json({ files });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Download from Google Drive
+app.post('/api/drive/download/:fileId', async (req, res) => {
+  if (!ENABLE_DRIVE) {
+    return res.status(400).json({ error: 'Google Drive not enabled' });
+  }
+
+  try {
+    const fileName = req.body.fileName || 'download';
+    const destPath = path.join(__dirname, 'public', 'uploads', fileName);
+    
+    await drive.downloadFromDrive(req.params.fileId, destPath);
+    
+    res.json({ 
+      message: 'Downloaded from Drive',
+      localPath: `/uploads/${path.basename(destPath)}`
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Delete file
@@ -101,4 +154,7 @@ app.get('/', (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`📁 File server running at http://0.0.0.0:${PORT}`);
+  if (ENABLE_DRIVE) {
+    console.log('☁️  Google Drive sync enabled');
+  }
 });
