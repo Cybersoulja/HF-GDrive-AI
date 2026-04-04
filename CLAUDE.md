@@ -42,6 +42,12 @@ This file provides guidance for AI assistants working in this codebase.
 │   └── vite.ts              # Vite dev server integration
 ├── shared/
 │   └── schema.ts            # Drizzle ORM schema + Zod validation types
+├── cloudflare-worker/       # Cloudflare Worker — HF API proxy
+│   ├── src/
+│   │   └── index.ts         # Worker entry point (routes: /health, /v1/chat, /v1/raw)
+│   ├── wrangler.toml        # Wrangler deployment config
+│   ├── tsconfig.json        # Worker-specific TS config
+│   └── package.json         # Worker dependencies (wrangler, @cloudflare/workers-types)
 ├── file-server/             # Standalone file + Google Drive server
 │   ├── server.js            # Express server (port 3000)
 │   ├── drive.js             # Google Drive API integration
@@ -92,10 +98,38 @@ Run from `file-server/`:
 
 ### HF API Client (`client/src/lib/hf.ts`)
 
-- Calls the OpenAI-compatible HF endpoint first: `https://api-inference.huggingface.co/v1/chat/completions`
-- Falls back to the raw text generation endpoint for models that don't support the chat format.
+- When `VITE_WORKER_URL` is set, all inference is routed through the Cloudflare Worker proxy (no API key in the browser).
+- Without `VITE_WORKER_URL`, calls HF directly from the browser using the key stored in Zustand.
+- Tries the OpenAI-compatible chat completions endpoint first; falls back to the raw text generation endpoint for models that don't support the chat format.
 - Streaming via `ReadableStream` and SSE (`data: ...` line parsing).
-- API key is read from the Zustand store; never hardcoded or sent through the backend.
+- `AbortSignal` is wired end-to-end — the Stop button in both Home and Chat actually cancels the in-flight request.
+
+### Cloudflare Worker (`cloudflare-worker/`)
+
+The Worker is an HF API proxy that keeps the API key server-side as a Cloudflare secret.
+
+**Endpoints:**
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Validates the worker is running and `HF_API_KEY` is valid |
+| `POST` | `/v1/chat` | Proxies to the HF chat completions endpoint with streaming passthrough |
+| `POST` | `/v1/raw` | Proxies to the HF raw text generation endpoint (fallback for non-chat models) |
+
+**Setup:**
+```bash
+cd cloudflare-worker
+npm install
+wrangler secret put HF_API_KEY   # store your HF token as a secret
+npm run deploy                   # deploy to Cloudflare
+```
+
+Set `VITE_WORKER_URL` in the client (e.g. in `.env.local`) to the deployed Worker URL:
+```
+VITE_WORKER_URL=https://hf-gdrive-ai-worker.<your-subdomain>.workers.dev
+```
+
+**CORS:** Set `ALLOWED_ORIGIN` in `wrangler.toml` `[vars]` to your app's domain in production. It defaults to `"*"` for development.
 
 ### Backend
 
@@ -115,11 +149,25 @@ Run from `file-server/`:
 
 ## Environment Variables
 
+**Main app (Express + Vite):**
+
 | Variable | Required | Description |
 |---|---|---|
 | `DATABASE_URL` | For DB migrations | PostgreSQL connection string |
 | `PORT` | No (default 5000) | Server port |
 | `NODE_ENV` | No | `development` or `production` |
+
+**Client (Vite, prefix with `VITE_`):**
+
+| Variable | Required | Description |
+|---|---|---|
+| `VITE_WORKER_URL` | No | Cloudflare Worker URL. When set, inference is proxied through the Worker and no HF API key is needed in the browser. |
+
+**Cloudflare Worker (set via `wrangler secret`):**
+
+| Secret | Required | Description |
+|---|---|---|
+| `HF_API_KEY` | Yes | Hugging Face API token |
 
 **File server only** (not env vars — file-based):
 - `file-server/credentials.json` — Google Cloud OAuth 2.0 client credentials
@@ -151,7 +199,7 @@ The esbuild config in `script/build.ts` marks Node built-ins and most `node_modu
 - **Tests**: No test suite is currently present. When adding tests, use Vitest (already compatible with the Vite setup).
 - **Authentication**: The `users` table and Passport.js dependency exist but no auth routes or middleware are implemented.
 - **Database queries**: `MemStorage` is the only implementation. A real database-backed storage class needs to be written in `server/storage.ts`.
-- **Server-side HF proxy**: All HF API calls are made directly from the browser. If a server-side proxy is needed, add routes in `server/routes.ts`.
+- **Cloudflare Worker deployment**: The Worker code is written but not yet deployed. See the setup steps in the Cloudflare Worker section above.
 
 ---
 

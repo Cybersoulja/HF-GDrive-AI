@@ -29,6 +29,7 @@ export default function Chat() {
   const [input, setInput] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentStream, setCurrentStream] = useState("");
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -36,8 +37,10 @@ export default function Chat() {
     }
   }, [messages, currentStream]);
 
+  const workerConfigured = !!import.meta.env.VITE_WORKER_URL;
+
   const handleSend = async () => {
-    if (!store.apiKey) {
+    if (!workerConfigured && !store.apiKey) {
       toast({ title: "No API Key", description: "Configure in settings first.", variant: "destructive" });
       return;
     }
@@ -49,13 +52,17 @@ export default function Chat() {
     setIsGenerating(true);
     setCurrentStream("");
 
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
     try {
         const output = await runInference(
-            store.apiKey,
+            store.apiKey ?? "",
             store.activeModelId,
             newMsgs,
             store.generationParams,
-            (chunk) => setCurrentStream(chunk)
+            (chunk) => setCurrentStream(chunk),
+            abortController.signal
         );
 
         setMessages(prev => [...prev, { role: "assistant", content: output }]);
@@ -166,7 +173,7 @@ export default function Chat() {
                 <Button 
                     size="icon" 
                     className="absolute right-1 top-1 h-10 w-10" 
-                    onClick={isGenerating ? () => setIsGenerating(false) : handleSend}
+                    onClick={isGenerating ? () => { abortControllerRef.current?.abort(); setIsGenerating(false); } : handleSend}
                     variant={isGenerating ? "destructive" : "default"}
                 >
                     {isGenerating ? <StopCircle className="h-4 w-4" /> : <Send className="h-4 w-4" />}
