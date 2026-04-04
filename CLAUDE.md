@@ -108,8 +108,8 @@ Run from `file-server/`:
 
 - Entirely separate from the main app — its own `package.json`, runs on port 3000.
 - Google Drive sync is **optional**: only activates when `credentials.json` and `token.json` are present.
+- File uploads are stored in `file-server/public/uploads/` with UUID-prefixed names.
 - `credentials.json` must be obtained from Google Cloud Console (OAuth 2.0 client). Run `npm run auth` once to generate `token.json`.
-- File uploads stored in `file-server/public/uploads/` with UUID-prefixed names.
 
 ---
 
