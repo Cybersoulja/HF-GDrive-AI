@@ -27,8 +27,10 @@ export default function Home() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [controller, setController] = useState<AbortController | null>(null);
 
+  const workerConfigured = !!import.meta.env.VITE_WORKER_URL;
+
   const handleRun = async () => {
-    if (!store.apiKey) {
+    if (!workerConfigured && !store.apiKey) {
       toast({ title: "No API Key", description: "Please add your Hugging Face Token in settings.", variant: "destructive" });
       return;
     }
@@ -36,7 +38,7 @@ export default function Home() {
 
     setIsGenerating(true);
     setOutput("");
-    const abortController = new AbortController(); // Note: Abort not fully implemented in my simplified fetch yet, but good practice
+    const abortController = new AbortController();
     setController(abortController);
 
     try {
@@ -46,11 +48,12 @@ export default function Home() {
         ];
 
         const finalOutput = await runInference(
-            store.apiKey,
+            store.apiKey ?? "",
             store.activeModelId,
             messages,
             store.generationParams,
-            (chunk) => setOutput(chunk)
+            (chunk) => setOutput(chunk),
+            abortController.signal
         );
 
         store.addToHistory({
@@ -74,8 +77,6 @@ export default function Home() {
   };
 
   const handleStop = () => {
-      // Since fetch isn't easily abortable in the simplified version without signal (I should have added signal),
-      // we'll just stop updating state for now.
       if (controller) controller.abort();
       setIsGenerating(false);
   };

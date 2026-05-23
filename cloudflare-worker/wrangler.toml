@@ -1,0 +1,12 @@
+name = "hf-gdrive-ai-worker"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+# Allowed origin for CORS. Set to your app's domain in production.
+# e.g. "https://your-app.pages.dev" or "https://yourdomain.com"
+# Use "*" only during development.
+[vars]
+ALLOWED_ORIGIN = "*"
+
+# Store your HF API key as a secret (never commit it):
+#   wrangler secret put HF_API_KEY
